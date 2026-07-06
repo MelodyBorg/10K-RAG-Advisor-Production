@@ -21,4 +21,5 @@ RUN ollama serve & sleep 5 && ollama pull qwen3:8b && ollama pull mistral && pki
 EXPOSE 8501
 
 # Replace the old CMD with this
+# We use 'exec' to ensure the app runs as the main process
 CMD ["sh", "-c", "ollama serve & sleep 10 && ollama pull qwen3:8b && ollama pull mistral && streamlit run app.py"]
