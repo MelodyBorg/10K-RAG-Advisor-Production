@@ -26,30 +26,24 @@ logger = logging.getLogger("app")
 BACKEND_OK = True
 BACKEND_ERR = ""
 
-try:
-    # 1. Infrastructure Check: Load API Key (secrets first, env fallback).
-    #    st.secrets raises on Cloud if no secrets are configured, so guard it.
-    _secret_key = None
-    try:
-        _secret_key = st.secrets.get("GOOGLE_API_KEY")
-    except Exception:
-        _secret_key = None
+# --- Infrastructure Check: Load API Key ---
+    # We check environment variables first (Hugging Face / Docker friendly)
+    # and fall back to st.secrets for local Streamlit compatibility.
+    api_key = os.getenv("GOOGLE_API_KEY")
+    
+    if not api_key:
+        try:
+            api_key = st.secrets.get("GOOGLE_API_KEY")
+        except Exception:
+            api_key = None
 
-    if _secret_key:
-        os.environ["GOOGLE_API_KEY"] = _secret_key
-    elif not os.getenv("GOOGLE_API_KEY"):
+    if api_key:
+        os.environ["GOOGLE_API_KEY"] = api_key
+    else:
         raise RuntimeError(
-            "GOOGLE_API_KEY not found. Add it under App settings -> Secrets "
-            "on Streamlit Cloud, or export it in your local shell."
+            "GOOGLE_API_KEY not found. Please set it in your Space 'Variables' "
+            "or 'Secrets' settings."
         )
-
-    # 2. Module Import (fails here if a package is missing from requirements.txt)
-    from query import run_ui_query
-    from router import get_router_decision
-
-except Exception as exc:
-    BACKEND_OK = False
-    BACKEND_ERR = f"{type(exc).__name__}: {exc}"
 
 
 # --- Page Optimization Settings ---
