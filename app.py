@@ -29,21 +29,21 @@ BACKEND_ERR = ""
 # --- Infrastructure Check: Load API Key ---
     # We check environment variables first (Hugging Face / Docker friendly)
     # and fall back to st.secrets for local Streamlit compatibility.
-    api_key = os.getenv("GOOGLE_API_KEY")
+api_key = os.getenv("GOOGLE_API_KEY")
     
-    if not api_key:
-        try:
-            api_key = st.secrets.get("GOOGLE_API_KEY")
-        except Exception:
-            api_key = None
+if not api_key:
+    try:
+        api_key = st.secrets.get("GOOGLE_API_KEY")
+    except Exception:
+        api_key = None
 
-    if api_key:
-        os.environ["GOOGLE_API_KEY"] = api_key
-    else:
-        raise RuntimeError(
-            "GOOGLE_API_KEY not found. Please set it in your Space 'Variables' "
-            "or 'Secrets' settings."
-        )
+if api_key:
+    os.environ["GOOGLE_API_KEY"] = api_key
+else:
+    raise RuntimeError(
+        "GOOGLE_API_KEY not found. Please set it in your Space 'Variables' "
+        "or 'Secrets' settings."
+    )
 
 
 # --- Page Optimization Settings ---
