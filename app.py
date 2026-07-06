@@ -26,25 +26,32 @@ logger = logging.getLogger("app")
 BACKEND_OK = True
 BACKEND_ERR = ""
 
-# --- Infrastructure Check: Load API Key ---
-    # We check environment variables first (Hugging Face / Docker friendly)
-    # and fall back to st.secrets for local Streamlit compatibility.
-api_key = os.getenv("GOOGLE_API_KEY")
+try:
+    # 1. Infrastructure Check: Load API Key
+    api_key = os.getenv("GOOGLE_API_KEY")
     
-if not api_key:
-    try:
-        api_key = st.secrets.get("GOOGLE_API_KEY")
-    except Exception:
-        api_key = None
+    if not api_key:
+        try:
+            api_key = st.secrets.get("GOOGLE_API_KEY")
+        except Exception:
+            api_key = None
 
-if api_key:
-    os.environ["GOOGLE_API_KEY"] = api_key
-else:
-    raise RuntimeError(
-        "GOOGLE_API_KEY not found. Please set it in your Space 'Variables' "
-        "or 'Secrets' settings."
-    )
+    if api_key:
+        os.environ["GOOGLE_API_KEY"] = api_key
+    else:
+        raise RuntimeError(
+            "GOOGLE_API_KEY not found. Please set it in your Space 'Variables' "
+            "or 'Secrets' settings."
+        )
 
+    # 2. Module Import (Now properly inside the try block)
+    from query import run_ui_query
+    from router import get_router_decision
+
+except Exception as exc:
+    BACKEND_OK = False
+    BACKEND_ERR = f"{type(exc).__name__}: {exc}"
+    
 
 # --- Page Optimization Settings ---
 st.set_page_config(page_title="10-K RAG Advisor", layout="wide",
