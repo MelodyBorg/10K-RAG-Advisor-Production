@@ -1,0 +1,12 @@
+streamlit
+langchain
+langchain-core
+langchain-community
+langchain-google-genai
+langchain-openai
+langchain-text-splitters
+google-genai
+faiss-cpu
+pypdf
+pandas
+numpy

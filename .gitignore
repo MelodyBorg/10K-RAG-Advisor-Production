@@ -1,0 +1,9 @@
+# Local secrets — never commit
+.streamlit/secrets.toml
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Local editor / tooling config
+.claude/
