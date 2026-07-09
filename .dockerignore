@@ -1,0 +1,12 @@
+# Ignore everything
+*
+# But allow the files your app needs
+!app.py
+!query.py
+!router.py
+!start.sh
+!Dockerfile
+!requirements.txt
+!README.md
+!PDFs/
+!faiss_index_*/

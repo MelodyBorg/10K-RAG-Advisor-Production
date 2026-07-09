@@ -27,20 +27,21 @@ BACKEND_OK = True
 BACKEND_ERR = ""
 
 try:
-    # 1. Infrastructure Check: Load API Key (secrets first, env fallback).
-    #    st.secrets raises on Cloud if no secrets are configured, so guard it.
-    _secret_key = None
-    try:
-        _secret_key = st.secrets.get("GOOGLE_API_KEY")
-    except Exception:
-        _secret_key = None
+    # 1. Infrastructure Check: Load API Key (env first, secrets fallback).
+    api_key = os.getenv("GOOGLE_API_KEY")
 
-    if _secret_key:
-        os.environ["GOOGLE_API_KEY"] = _secret_key
-    elif not os.getenv("GOOGLE_API_KEY"):
+    if not api_key:
+        try:
+            api_key = st.secrets.get("GOOGLE_API_KEY")
+        except Exception:
+            api_key = None
+
+    if api_key:
+        os.environ["GOOGLE_API_KEY"] = api_key
+    else:
         raise RuntimeError(
-            "GOOGLE_API_KEY not found. Add it under App settings -> Secrets "
-            "on Streamlit Cloud, or export it in your local shell."
+            "GOOGLE_API_KEY not found. Please set it in your Space 'Variables' "
+            "or 'Secrets' settings."
         )
 
     # OpenAI (GPT) key is OPTIONAL: only the GPT tier needs it. Load it from
