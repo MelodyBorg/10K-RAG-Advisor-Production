@@ -4,8 +4,10 @@ langchain-core
 langchain-community
 langchain-google-genai
 langchain-openai
+langchain-ollama
 langchain-text-splitters
 google-genai
+openai
 faiss-cpu
 pypdf
 pandas

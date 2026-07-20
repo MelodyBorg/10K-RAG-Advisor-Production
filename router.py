@@ -5,9 +5,14 @@ router.py
 Semantic traffic router for the 10-K comparison RAG system
 (Alphabet, Amazon, Microsoft).
 
-Classifies an incoming financial query into one of three computational tiers
-using a rapid, deterministic Gemini classification call (google-genai SDK,
-gemini-2.5-flash, temperature=0.0, JSON-enforced output):
+Classifies an incoming financial query into one of four computational tiers
+using a rapid, deterministic OpenAI classification call (gpt-4o-mini,
+temperature=0.0, strict JSON-schema-enforced output). Routing runs on
+gpt-4o-mini deliberately: it is cheap, fast, and — critically — does NOT
+consume the Gemini free-tier quota that the main Gemini answer tier depends
+on (routing on Gemini caused every routing call to compete with actual
+answers for the same 5/min quota, collapsing Auto-Pilot to permanent
+fallback).
 
     Tier 1  "gemini"  Cloud / Advanced   k=12  cross-company, multi-hop,
                                                multi-entity synthesis
@@ -24,14 +29,15 @@ Public API (import from your query engine):
         returns (route, reason, recommended_k)
 
 Resilience: any API timeout, network exception, or validation failure falls
-back to ("gemini", "Routing bypass due to exception catch", 12) so the
-pipeline never stalls on the router.
+back to ("gemini", <reason explaining the failure>, 12) so the pipeline
+never stalls on the router. Rate-limit failures carry a distinct reason so
+the UI can tell the user the router was skipped because a limit was hit.
 
 Environment:
-    GOOGLE_API_KEY  required (google-genai reads it automatically)
+    OPENAI_API_KEY  required (the openai SDK reads it automatically)
 
 Dependencies:
-    pip install google-genai
+    pip install openai
 """
 
 from __future__ import annotations
@@ -41,43 +47,66 @@ import logging
 import os
 from functools import lru_cache
 
-from google import genai
-from google.genai import types
-from google.genai.errors import APIError
+from openai import (
+    APIConnectionError,
+    APIError,
+    APITimeoutError,
+    OpenAI,
+    RateLimitError,
+)
 
 logger = logging.getLogger("router")
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-ROUTER_MODEL = "gemini-2.5-flash"
-REQUEST_TIMEOUT_MS = 15_000  # 15s hard cap on the classification call
+ROUTER_MODEL = os.getenv("ROUTER_MODEL", "gpt-4o-mini")
+REQUEST_TIMEOUT_S = 15.0  # 15s hard cap on the classification call
 
 VALID_ROUTES = {"gemini", "gpt5", "qwen", "ollama"}
 ROUTE_K = {"gemini": 12, "gpt5": 12, "qwen": 4, "ollama": 4}
 
+# Generic fallback for unexpected failures. Rate-limit failures get their own
+# reason (below) so the UI can surface WHY routing was skipped.
 FALLBACK_DECISION: tuple[str, str, int] = (
     "gemini",
-    "Routing bypass due to exception catch",
+    "Router bypassed (unexpected error contacting the routing model) — "
+    "defaulted to Gemini.",
     12,
 )
 
-# JSON schema enforced on the model output (google-genai structured output)
-RESPONSE_SCHEMA = types.Schema(
-    type=types.Type.OBJECT,
-    properties={
-        "route": types.Schema(
-            type=types.Type.STRING,
-            enum=["gemini", "gpt5", "qwen", "ollama"],
-        ),
-        "reason": types.Schema(type=types.Type.STRING),
-        "recommended_k": types.Schema(
-            type=types.Type.INTEGER,
-            enum=["12", "4"],
-        ),
-    },
-    required=["route", "reason", "recommended_k"],
+RATE_LIMIT_FALLBACK: tuple[str, str, int] = (
+    "gemini",
+    "Router bypassed — the routing model's API rate limit or quota was "
+    "reached, so this query was not classified and defaulted to Gemini.",
+    12,
 )
+
+MISSING_KEY_FALLBACK: tuple[str, str, int] = (
+    "gemini",
+    "Router bypassed — OPENAI_API_KEY is not configured, so semantic "
+    "routing is unavailable and the query defaulted to Gemini.",
+    12,
+)
+
+# Strict JSON schema enforced on the model output (OpenAI structured output)
+RESPONSE_JSON_SCHEMA = {
+    "name": "route_decision",
+    "strict": True,
+    "schema": {
+        "type": "object",
+        "properties": {
+            "route": {
+                "type": "string",
+                "enum": ["gemini", "gpt5", "qwen", "ollama"],
+            },
+            "reason": {"type": "string"},
+            "recommended_k": {"type": "integer", "enum": [12, 4]},
+        },
+        "required": ["route", "reason", "recommended_k"],
+        "additionalProperties": False,
+    },
+}
 
 SYSTEM_INSTRUCTION = """You are a deterministic query router for a financial
 RAG system over SEC 10-K filings (Alphabet, Amazon, Microsoft). Classify each
@@ -168,15 +197,12 @@ Output strictly: {"route": "...", "reason": "...", "recommended_k": 12 or 4}
 # Client
 # ---------------------------------------------------------------------------
 @lru_cache(maxsize=1)
-def _get_client() -> genai.Client:
-    """Lazily construct (and cache) the google-genai client."""
-    api_key = os.getenv("GOOGLE_API_KEY")
+def _get_client() -> OpenAI:
+    """Lazily construct (and cache) the OpenAI client."""
+    api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
-        raise RuntimeError("GOOGLE_API_KEY environment variable is not set.")
-    return genai.Client(
-        api_key=api_key,
-        http_options=types.HttpOptions(timeout=REQUEST_TIMEOUT_MS),
-    )
+        raise RuntimeError("OPENAI_API_KEY environment variable is not set.")
+    return OpenAI(api_key=api_key, timeout=REQUEST_TIMEOUT_S)
 
 
 # ---------------------------------------------------------------------------
@@ -243,36 +269,45 @@ def get_router_decision(question: str) -> tuple[str, str, int]:
         (route, reason, recommended_k) where route is one of
         "gemini" | "qwen" | "ollama" and recommended_k is 12 or 4.
 
-    Never raises: any exception (timeout, network, validation) resolves to
-    the resilient fallback ("gemini", "Routing bypass due to exception
-    catch", 12).
+    Never raises: any exception (timeout, network, validation, rate limit)
+    resolves to a resilient Gemini fallback whose reason string explains
+    what went wrong, so the UI can surface it to the user.
     """
     if not question or not question.strip():
         return FALLBACK_DECISION
 
     try:
         client = _get_client()
-        response = client.models.generate_content(
+        response = client.chat.completions.create(
             model=ROUTER_MODEL,
-            contents=question.strip(),
-            config=types.GenerateContentConfig(
-                system_instruction=SYSTEM_INSTRUCTION,
-                temperature=0.0,
-                response_mime_type="application/json",
-                response_schema=RESPONSE_SCHEMA,
-                # Router calls should be instant; disable thinking budget.
-                thinking_config=types.ThinkingConfig(thinking_budget=0),
-            ),
+            temperature=0.0,
+            response_format={
+                "type": "json_schema",
+                "json_schema": RESPONSE_JSON_SCHEMA,
+            },
+            messages=[
+                {"role": "system", "content": SYSTEM_INSTRUCTION},
+                {"role": "user", "content": question.strip()},
+            ],
         )
 
-        raw = _strip_markdown_fences(response.text or "")
+        raw = _strip_markdown_fences(response.choices[0].message.content or "")
         payload = json.loads(raw)
         route, reason, k = _validate_decision(payload)
 
         logger.info("Routed to %-6s (k=%-2d): %s", route, k, reason)
         return route, reason, k
 
-    except (APIError, TimeoutError, ConnectionError) as exc:
+    except RateLimitError as exc:
+        # Distinct fallback so the user learns a LIMIT (not a bug) was hit.
+        logger.error("Router rate limit/quota failure: %s", exc)
+        return RATE_LIMIT_FALLBACK
+    except RuntimeError as exc:
+        # Raised by _get_client when the API key is absent.
+        logger.error("Router configuration failure: %s", exc)
+        return MISSING_KEY_FALLBACK
+    except (APIError, APITimeoutError, APIConnectionError,
+            TimeoutError, ConnectionError) as exc:
         logger.error("Router API/network failure: %s", exc)
         return FALLBACK_DECISION
     except (json.JSONDecodeError, ValueError) as exc:

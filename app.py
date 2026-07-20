@@ -75,6 +75,27 @@ st.set_page_config(page_title="10-K RAG Advisor", layout="wide",
 IS_CLOUD = os.getenv("CLOUD_ONLY", "").strip() == "1" or \
     os.path.exists("/mount/src")  # Community Cloud repo mount path
 
+
+# --- Local Ollama daemon detection (graceful degradation) ---
+# The local tiers (Qwen3 / Mistral) need a reachable Ollama daemon. If it is
+# not running, hide those tiers and promote any local route to Gemini instead
+# of surfacing a raw connection error. Cached briefly so every Streamlit rerun
+# doesn't pay the probe cost, but a freshly started daemon appears within ~15s.
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+
+
+@st.cache_data(ttl=15, show_spinner=False)
+def _ollama_daemon_up() -> bool:
+    import urllib.request
+    try:
+        with urllib.request.urlopen(f"{OLLAMA_BASE_URL}/api/tags", timeout=2):
+            return True
+    except Exception:
+        return False
+
+
+LOCAL_TIERS_AVAILABLE = (not IS_CLOUD) and _ollama_daemon_up()
+
 # --- Custom Premium FinTech Styles (The Synex Aesthetic) ---
 SYNEX_THEME_CSS = """
 <style>
@@ -215,18 +236,28 @@ if "messages" not in st.session_state:
     st.session_state.messages = []
 
 # --- Custom Screen Layout Functions ---
+def _escape_dollars(text: str) -> str:
+    """
+    Streamlit's markdown renderer treats $...$ pairs as LaTeX math, which
+    mangles financial answers full of dollar amounts. Replacing $ with its
+    HTML entity renders a literal dollar sign without triggering math mode
+    (these blocks are emitted with unsafe_allow_html=True).
+    """
+    return text.replace("$", "&#36;")
+
+
 def display_dashboard_header():
     st.markdown('<div class="header-title">Clarity and control for<br>your portfolio insights.</div>', unsafe_allow_html=True)
     st.markdown('<div class="header-sub">Institutional filing intelligence across Alphabet, Amazon, and Microsoft.</div>', unsafe_allow_html=True)
 
 def render_user_turn(query_text: str):
-    st.markdown(f'<div class="query-card">Query: {query_text}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="query-card">Query: {_escape_dollars(query_text)}</div>', unsafe_allow_html=True)
 
 def render_system_turn(response_text: str):
     st.markdown(f"""
         <div class="insight-card">
             <div class="insight-label">System Insight</div>
-            {response_text}
+            {_escape_dollars(response_text)}
         </div>
     """, unsafe_allow_html=True)
 
@@ -239,7 +270,7 @@ def render_data_provenance(metadata_payload: dict):
         retrieved_documents = metadata_payload.get("docs") or []
         for index, doc in enumerate(retrieved_documents, start=1):
             doc_meta = getattr(doc, "metadata", {})
-            doc_content = getattr(doc, "page_content", str(doc))[:600] + "..."
+            doc_content = _escape_dollars(getattr(doc, "page_content", str(doc))[:600] + "...")
             st.markdown(f"""
                 <div class="chunk-card">
                     <div class="chunk-meta">Source Document {index} — {doc_meta.get('company', 'Corporate Entity')} | {doc_meta.get('section', 'Filing Section')} | Page {doc_meta.get('page', '?')}</div>
@@ -269,7 +300,7 @@ TIER_OPTIONS = [
     "GPT-4o (OpenAI Cloud)",
     "GPT-5.4 (OpenAI Cloud)",
 ]
-if not IS_CLOUD:
+if LOCAL_TIERS_AVAILABLE:
     TIER_OPTIONS += ["Qwen3 (Local KPI)", "Mistral (Local Narrative)"]
 
 selected_infrastructure = st.radio(
@@ -282,6 +313,10 @@ selected_infrastructure = st.radio(
 if IS_CLOUD:
     st.caption("Running on Streamlit Cloud — local Ollama tiers (Qwen3 / Mistral) "
                "are unavailable here; Auto-Pilot resolves everything to Gemini.")
+elif not LOCAL_TIERS_AVAILABLE:
+    st.caption("Local Ollama daemon not detected — Qwen3 / Mistral tiers are "
+               "hidden and Auto-Pilot promotes local routes to the cloud. "
+               "Start it with `ollama serve` to enable them.")
 
 # Operational Mapping Configuration Tuple
 INFRASTRUCTURE_REGISTRY = {
@@ -322,12 +357,13 @@ if user_question:
                 execution_mode_key, routing_system_rationale, effective_k_value = "gemini", "Bypass execution fallback route.", 12
                 logger.error(f"Router module runtime error trace: {routing_error}")
 
-            # FIX: on the cloud there is no Ollama daemon, so any local route
-            # from the router is transparently promoted to the Gemini tier.
-            if IS_CLOUD and execution_mode_key in ("qwen", "ollama"):
+            # FIX: a local route only works with a reachable Ollama daemon
+            # (absent on Streamlit Cloud, and locally when `ollama serve` is
+            # not running), so promote it transparently to the Gemini tier.
+            if execution_mode_key in ("qwen", "ollama") and not LOCAL_TIERS_AVAILABLE:
                 routing_system_rationale = (
                     f"{routing_system_rationale} "
-                    "[Promoted to Gemini: local tiers unavailable on Streamlit Cloud]"
+                    "[Promoted to Gemini: local Ollama tiers unavailable]"
                 )
                 execution_mode_key, effective_k_value = "gemini", 12
 
@@ -341,11 +377,31 @@ if user_question:
                 )
                 execution_mode_key, effective_k_value = "gemini", 12
 
+        # A bypassed router is worth telling the user about directly, not
+        # just burying in the provenance expander.
+        if routing_system_rationale and routing_system_rationale.startswith("Router bypassed"):
+            st.warning(routing_system_rationale)
+
         # Engage execution layer
         try:
             generated_answer, source_evidence_docs = run_ui_query(mode=execution_mode_key, question=user_question, k=effective_k_value)
         except Exception as execution_error:
-            generated_answer = f"System connection error occurred during model generation. Detail logs: {str(execution_error)}"
+            error_detail = str(execution_error)
+            rate_limit_markers = (
+                "rate limit", "ratelimit", "429", "resource_exhausted",
+                "insufficient_quota", "quota",
+            )
+            if any(marker in error_detail.lower() for marker in rate_limit_markers):
+                generated_answer = (
+                    f"⚠️ <b>API limit reached — no answer was generated.</b> "
+                    f"The <b>{str(execution_mode_key).upper()}</b> tier rejected this request "
+                    f"because its API rate limit or usage quota has been hit. "
+                    f"This is a temporary limit on the API key, not an error in your question. "
+                    f"You can: wait a minute and re-ask, switch to a different "
+                    f"computational tier above, or upgrade the API plan for this key."
+                )
+            else:
+                generated_answer = f"System connection error occurred during model generation. Detail logs: {error_detail}"
             source_evidence_docs = []
 
     # Commit full state trace package
