@@ -119,12 +119,12 @@ Instead of making the user guess which model suits their question, the default *
 
 | Name | Role |
 |------|------|
-| Xing Wang | Added Open-AI model, refined backedn, and helped with debugging |
-| Melody Borg | *TODO — role* |
-| Erhao Shao | *TODO — role* |
-| Fernando Erler | *TODO — role* |
-| Zhezhen Wang | *TODO — role* |
-| Tianwen Guan | *TODO — role* |
+| Xing Wang | Added Open-AI model, Refined backend (router, exception handling, etc.), Helped with debugging, Tested Model |
+| Melody Borg | Deployed qwen mistral Gemini, Built router, Fix chunk amount retrieval, Deployed dockerized on hugging face |
+| Erhao Shao | Concluded and summarized the slides |
+| Fernando Erler | Drafted Questions, Created and organized presentation |
+| Zhezhen Wang | Explained retrieval bias in RAG systems and present our Fair Share Retrieval solution |
+| Tianwen Guan | Drafted 10 questions for testing |
 
 ## 7. Running locally
 
