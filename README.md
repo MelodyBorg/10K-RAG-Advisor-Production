@@ -119,12 +119,12 @@ Instead of making the user guess which model suits their question, the default *
 
 | Name | Role |
 |------|------|
-| Xing Wang | Added open-AI model and helped with debugging |
-| *TODO — name* | *TODO — role* |
-| *TODO — name* | *TODO — role* |
-| *TODO — name* | *TODO — role* |
-| *TODO — name* | *TODO — role* |
-| *TODO — name* | *TODO — role* |
+| Xing Wang | Added Open-AI model, refined backedn, and helped with debugging |
+| Melody Borg | *TODO — role* |
+| Erhao Shao | *TODO — role* |
+| Fernando Erler | *TODO — role* |
+| Zhezhen Wang | *TODO — role* |
+| Tianwen Guan | *TODO — role* |
 
 ## 7. Running locally
 
