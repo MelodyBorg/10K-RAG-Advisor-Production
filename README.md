@@ -8,7 +8,7 @@ app_port: 8501
 pinned: false
 ---
 
-# 10-K RAG Advisor
+# 10-K RAG Advisor TECH NOTES
 
 A multi-model RAG chatbot that compares **Alphabet, Amazon, and Microsoft** using their FY2025 SEC 10-K filings. Ask it anything from "How much cash did Amazon have at the end of 2025?" to "How does Microsoft's cloud strategy differ from Amazon's?" — it retrieves the relevant filing passages, answers strictly from them, and shows you its sources.
 
