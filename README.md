@@ -12,8 +12,6 @@ pinned: false
 
 A multi-model RAG chatbot that compares **Alphabet, Amazon, and Microsoft** using their FY2025 SEC 10-K filings. Ask it anything from "How much cash did Amazon have at the end of 2025?" to "How does Microsoft's cloud strategy differ from Amazon's?" — it retrieves the relevant filing passages, answers strictly from them, and shows you its sources.
 
-**Public demo:** [huggingface.co/spaces/mborg18/10K-RAG-Advisor](https://huggingface.co/spaces/mborg18/10K-RAG-Advisor) (serves the Gemini and local Ollama tiers; the OpenAI tiers require a key and run locally).
-
 ---
 
 ## 1. Approach
@@ -121,7 +119,7 @@ Instead of making the user guess which model suits their question, the default *
 
 | Name | Role |
 |------|------|
-| *TODO — name* | *TODO — role* |
+| Xing Wang |  |
 | *TODO — name* | *TODO — role* |
 
 ## 7. Running locally
